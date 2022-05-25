@@ -1,0 +1,149 @@
+<?php
+
+use ApironeApi\Apirone;
+use ApironeApi\Payment;
+
+require_once(DIR_SYSTEM . 'library/apirone_api/Apirone.php');
+require_once(DIR_SYSTEM . 'library/apirone_api/Payment.php');
+
+class ControllerExtensionPaymentApironeMccp extends Controller {
+
+    public function index() {
+
+        $data['button_confirm'] = $this->language->get('button_confirm');
+        $this->load->model('checkout/order');
+        $this->load->language('extension/payment/apirone_mccp');
+        $this->load->model('extension/payment/apirone_mccp');
+
+        $account = unserialize($this->config->get('payment_apirone_mccp_account'))->account;
+        $order = $this->model_checkout_order->getOrder($this->session->data['order_id']);
+
+        $showTestnet = $this->model_extension_payment_apirone_mccp->showTestnet();
+
+
+        $selector = Payment::currencySelector($account, $order['total'], $order['currency_code'], $showTestnet);
+
+        $data['selector'] = $selector;
+        $data['order_id'] = $order['order_id'];
+        $data['order_key'] = Payment::makeInvoiceSecret( $this->config->get('payment_apirone_mccp_secret'), $order['total']);
+        $data['url_redirect'] = $this->url->link('extension/payment/apirone_mccp/confirm');
+
+        return $this->load->view('extension/payment/apirone_mccp', $data);
+    }
+
+    public function confirm() {
+
+        $this->load->model('checkout/order');
+        $this->load->language('extension/payment/apirone_mccp');
+        $this->load->model('extension/payment/apirone_mccp');
+
+        $currency = (isset($this->request->get['currency'])) ? (string) $this->request->get['currency'] : '';
+        $order_key = (isset($this->request->get['key'])) ? (string) $this->request->get['key'] : '';
+        $order_id = (isset($this->request->get['order'])) ? (int) $this->request->get['order'] : 0;
+
+        $secret = $this->config->get('payment_apirone_mccp_secret');
+        $order = $this->model_checkout_order->getOrder($order_id);
+        // Exit if $order_key is !valid
+        if (!Payment::checkInvoiceSecret($order_key, $secret, $order['total'])) {
+            return;
+        }
+
+        $currencyInfo = Apirone::getCurrency($currency);
+
+        // Is order invoice aready exists
+        $orderInvoice = $this->model_extension_payment_apirone_mccp->getInvoiceByOrderId($order_id);
+        if ($orderInvoice) {
+            $this->showInvoice($orderInvoice, $currencyInfo);
+            return;
+        }
+
+        $totalCrypto = Payment::fiat2crypto($order['total'], $order['currency_code'], $currency);
+        $amount = (int) Payment::cur2min($totalCrypto, $currencyInfo->{'units-factor'});
+
+        $lifetime = (int) $this->config->get('payment_apirone_mccp_timeout');
+        $invoiceSecret = Payment::makeInvoiceSecret($secret, $order_id);
+        $callback = $this->url->link('extension/payment/apirone_mccp/callback&id=' . $invoiceSecret);
+
+        $created = Apirone::invoiceCreate(
+            unserialize($this->config->get('payment_apirone_mccp_account')),
+            Payment::makeInvoiceData($currency, $amount, $lifetime, $callback, $order['total'], $order['currency_code'])
+        );
+
+        if($created) {
+            $invoice = $this->model_extension_payment_apirone_mccp->updateInvoice($order_id, $created);
+            $this->showInvoice($invoice, $currencyInfo);
+
+            return;
+        }
+        else {
+            $this->response->redirect($this->url->link('checkout/cart'));
+            return;
+        }
+    }
+
+    public function callback() {
+        $this->load->model('checkout/order');
+        $this->load->model('extension/payment/apirone_mccp');
+        $params = false;
+
+        $data = file_get_contents('php://input');
+        if($data) {
+            $params = json_decode($data);
+        }
+
+        if (!$params) {
+            http_response_code(400);
+            return;
+        }
+
+
+        $callback_secret = (isset($this->request->get['id'])) ? (string) $this->request->get['id'] : '';
+        $secret = $this->config->get('payment_apirone_mccp_secret');
+
+        $invoice = $this->model_extension_payment_apirone_mccp->getInvoiceById($params->invoice);
+        
+        if (!$invoice) {
+            http_response_code(400);
+            return;
+        }
+
+        if (!Payment::checkInvoiceSecret($callback_secret, $secret, $invoice->order_id)) {
+            http_response_code(400);
+            return;
+        }
+
+        $invoiceUpdated = Apirone::invoiceInfoPublic($invoice->invoice);
+
+        if($invoiceUpdated) {
+            $this->model_extension_payment_apirone_mccp->updateInvoice($invoice->order_id, $invoiceUpdated);
+        }
+    }
+
+    public function status() {
+        $this->load->model('extension/payment/apirone_mccp');
+        $id = $this->request->get['id'];
+
+        echo Payment::invoiceStatus($this->model_extension_payment_apirone_mccp->getInvoiceById($id));
+    }
+    
+    protected function showInvoice($invoice, &$currency) {
+
+        $merchant = $this->config->get('payment_apirone_mccp_merchantname');
+
+        if ($merchant == '') {
+            $merchant = $this->config->get('config_name');
+        }
+
+        $data['style'] = '<style>' . Payment::getAssets('style.css', true) . '</style>';
+        $data['script'] = '  <script type="text/javascript">' . Payment::getAssets('script.js', true) . '</script>';
+
+        $statusLink = $this->url->link('extension/payment/apirone_mccp/status', 'id=' . $invoice->invoice);
+
+        $data['invoice'] = Payment::invoice($invoice, $currency, $statusLink, $merchant);
+        $this->cart->clear();
+        $this->response->setOutput($this->load->view('extension/payment/apirone_mccp_invoice', $data));
+        return;
+    }
+
+
+}
