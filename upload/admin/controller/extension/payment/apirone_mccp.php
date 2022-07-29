@@ -193,7 +193,7 @@ class ControllerExtensionPaymentApironeMccp extends Controller {
 
         $this->model_setting_setting->editSetting('payment_apirone_mccp', $data);
 
-        $query = ApironeApi\Db::createInvoicesTableQuery('oc_');
+        $query = ApironeApi\Db::createInvoicesTableQuery(DB_PREFIX);
         $this->model_extension_payment_apirone_mccp->install_invoices_table($query);
     }
 
@@ -202,7 +202,7 @@ class ControllerExtensionPaymentApironeMccp extends Controller {
         $this->load->model('setting/setting');
         $this->model_setting_setting->deleteSetting('payment_apirone_mccp');
 
-        $query = ApironeApi\Db::deleteInvoicesTableQuery('oc_');
+        $query = ApironeApi\Db::deleteInvoicesTableQuery(DB_PREFIX);
         $this->model_extension_payment_apirone_mccp->delete_invoices_table($query);
     }
 
