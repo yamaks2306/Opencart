@@ -1,6 +1,5 @@
 name: 'Build and release'
 on:
-  workflow_dispatch:
   push:
     tags:
       - 'v*'
@@ -17,7 +16,6 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
             apirone-crypto-payments.oc*
