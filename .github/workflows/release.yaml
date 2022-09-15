@@ -15,8 +15,29 @@ jobs:
         run: make
 
       - name: Release
+        id: release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             apirone-crypto-payments.oc*
+
+      - name: Build message
+        run: |
+          get_message()
+          {
+          cat <<EOF
+          Release ${{ github.repository }} has been created. Link: ${{ steps.release.outputs.url }}
+          EOF
+          }
+          
+          echo MESSAGE=$(get_message) >> $GITHUB_ENV
+
+      - name: Notify Telegram
+        uses: yamaks2306/telegram-notification@main
+        if: always()
+        with:
+          chat_id: ${{ secrets.TG_TECH_CHAT_ID }}
+          token: ${{ secrets.TG_TOKEN }}
+          include_commit_info: false
+          message: ${{ env.MESSAGE }}
 
